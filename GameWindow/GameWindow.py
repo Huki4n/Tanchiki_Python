@@ -1,10 +1,11 @@
 import math
 from dataclasses import dataclass
 
-from PyQt6.QtCore import pyqtSlot, Qt
+from PyQt6.QtCore import pyqtSlot, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent, QTransform, QPixmap
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLineEdit, QLabel, QPushButton
 
+from Bullet.Bullet import Bullet
 from Client.Client import SocketCommunication
 from Signals.Signals import GUICommunication
 from ui_main import Ui_MainWindow, walls_coordinate
@@ -81,6 +82,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     self.pressed_keys = set()
     self.players = {}
     self.tank_pixmaps = {}
+    self.bullets = []
+
+    self.shoot_delay = 1000
+    self.can_shoot = True
+
+    self.current_direction = "top"
 
     self.directions = {
       frozenset([Qt.Key.Key_W]): "top",
@@ -96,8 +103,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     if self.player['id'] == 1:
       self.add_player_to_map((1, self.mapHeight - self.tankHeight), 0)
+
+    self.shoot_timer = QTimer()
+    self.shoot_timer.timeout.connect(self.reset_shoot_flag)
+    self.shoot_timer.start(self.shoot_delay)
     #
     self.show()
+
+  def reset_shoot_flag(self):
+    self.can_shoot = True
 
   @pyqtSlot(int, tuple)
   def player_updating_logic(self, player_id, position):
@@ -124,6 +138,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
   @pyqtSlot(QKeyEvent)
   def keyPressEvent(self, event: QKeyEvent):
     self.pressed_keys.add(event.key())
+
+    if event.key() == Qt.Key.Key_Space:
+      if self.can_shoot:
+        self.shoot_bullet(self.player['id'])
+
     self.game_updater()
 
   @pyqtSlot(QKeyEvent)
@@ -131,14 +150,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     self.pressed_keys.discard(event.key())
     self.game_updater()
 
-  def hideEvent(self, event):
-    print('hide')
-    self.pressed_keys.clear()
-    super().hideEvent(event)
-
   def add_player_to_map(self, position, player_id):
-    print(position, player_id)
-
     x, y = position
     tank_pixmap = QPixmap('assets/tank.png').scaled(self.tankWidth, self.tankHeight)
 
@@ -165,8 +177,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     if player_id not in self.players:
       return None
-
-    self.current_direction = None
 
     directions = {
       'left': (-self.speed, 0, -90 if player_id == 0 else 90),  # Угол 180 градусов для левого направления
@@ -222,3 +232,51 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     transform = QTransform().rotate(angle)
     rotated_pixmap = self.tank_pixmaps[player_id].transformed(transform, Qt.TransformationMode.SmoothTransformation)
     player_label.setPixmap(rotated_pixmap)
+
+  def shoot_bullet(self, player_id):
+    """Создание снаряда."""
+    if player_id not in self.players:
+      return
+
+    # Получаем позицию танка
+    player_label = self.players[player_id]
+    player_pos = player_label.pos()
+
+    bullet_directions = {
+      "right": [(
+        player_pos.x() + self.tankWidth - Bullet.bulletWidth // 2,
+        player_pos.y() + self.tankHeight // 2,
+      ), 0],
+      "bottom": [(
+        player_pos.x() + self.tankWidth // 2 - Bullet.bulletWidth // 4,
+        player_pos.y() + self.tankHeight - Bullet.bulletHeight * 2,
+      ), 90],
+      "left": [(
+        player_pos.x() + Bullet.bulletWidth // 2,
+        player_pos.y() + self.tankHeight // 2,
+      ), -180],
+      "top": [(
+        player_pos.x() + self.tankWidth // 2 - Bullet.bulletWidth // 4,
+        player_pos.y(),
+      ), -90],
+    }
+
+    start_pos = bullet_directions[self.current_direction][0]
+    angle = bullet_directions[self.current_direction][1]
+
+    # Создание снаряда
+    bullet = Bullet(
+      parent=self.centralWidget,
+      start_pos=start_pos,
+      angle=angle,
+      players=self.players,
+      on_hit_callback=self.handle_bullet_hit,
+    )
+
+    self.bullets.append(bullet)
+
+  def handle_bullet_hit(self, hit_type, target_id):
+    if hit_type == "wall":
+      print("Bullet hit a wall.")
+    elif hit_type == "player":
+      print(f"Bullet hit player {target_id}.")
