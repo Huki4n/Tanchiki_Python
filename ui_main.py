@@ -1,26 +1,8 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QLabel, QWidget, QGridLayout
+from PyQt6.QtWidgets import QLabel, QWidget, QGridLayout, QPushButton
 
-walls_coordinate = [
-  (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-  (1, 3), (2, 3), (3, 3), (4, 3), (5, 3),
-  (1, 5), (2, 5), (3, 5), (4, 5),
-  (1, 7), (2, 7), (3, 7), (4, 7),
-  (1, 9), (2, 9), (3, 9), (4, 9), (5, 9),
-  (1, 11), (2, 11), (3, 11), (4, 11), (5, 11),
-  (5, 5),
-  (5, 7),
-  (7, 2), (7, 3),
-  (7, 9), (7, 10),
-  (9, 1), (10, 1), (11, 1), (12, 1),
-  (9, 3), (10, 3), (11, 3), (12, 3),
-  (8, 5), (9, 5), (10, 5), (11, 5),
-  (9, 6),
-  (8, 7), (9, 7), (10, 7), (11, 7),
-  (9, 9), (10, 9), (11, 9), (12, 9),
-  (9, 11), (10, 11), (11, 11), (12, 11),
-]
+from constancs import Constants
 
 
 class Ui_MainWindow(object):
@@ -29,10 +11,7 @@ class Ui_MainWindow(object):
     self.labels = None
     self.MainWindow = None
     self.firstPlayer = None
-    self.MainWindow = None
 
-    self.mapWidth, self.mapHeight = 830, 780
-    self.tankWidth, self.tankHeight = 54, 48
     self.speed = 4
 
   def setupUi(self, MainWindow):
@@ -49,7 +28,7 @@ class Ui_MainWindow(object):
     if not self.MainWindow.objectName():
       self.MainWindow.setObjectName(u"MainWindow")
 
-    self.MainWindow.resize(self.mapWidth, self.mapHeight)
+    self.MainWindow.resize(Constants.mapWidth, Constants.mapHeight)
 
     self.centralWidget = QWidget(self.MainWindow)
     self.centralWidget.setObjectName(u"centralwidget")
@@ -66,6 +45,30 @@ class Ui_MainWindow(object):
 
     self.centralWidget.setLayout(self.gridLayout_2)
     self.MainWindow.setCentralWidget(self.centralWidget)
+
+  def render_finish_game(self, text, color):
+    newCentralWidget = QWidget(self.MainWindow)
+    newGridLayout = QGridLayout(newCentralWidget)
+    newCentralWidget.setLayout(newGridLayout)
+
+    # Создаем QLabel с текстом
+    label = QLabel(text)
+
+    # Настраиваем стиль и выравнивание текста
+    label.setStyleSheet(f"color: {color}; font-size: 100px; font-weight: bold;")
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Выравнивание текста по центру
+
+    # Добавляем QLabel в макет
+    close_button = QPushButton('Close')
+    close_button.setStyleSheet("font-size: 20px; padding: 10px;")
+    close_button.clicked.connect(self.MainWindow.close)  # Подключаем к слоту закрытия окна
+
+    # Добавляем элементы в макет
+    newGridLayout.addWidget(label, 0, 0, 1, 1)
+    newGridLayout.addWidget(close_button, 1, 0, 1, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    # Устанавливаем новый центральный виджет
+    self.MainWindow.setCentralWidget(newCentralWidget)
 
   def add_blocks_to_layout(self):
     self.labels = dict()
@@ -86,7 +89,7 @@ class Ui_MainWindow(object):
         self.labels[(row, col)] = label
 
   def add_walls_to_map(self):
-    for coord in walls_coordinate:
+    for coord in Constants.walls_coordinate:
       row, col = coord
       self.labels[(row, col)].setStyleSheet(f"""
             QLabel {{
@@ -94,6 +97,5 @@ class Ui_MainWindow(object):
                 background-repeat: no-repeat;
                 background-position: center;
                 background-size: cover;
-                border: 1px solid red;
             }}
         """)

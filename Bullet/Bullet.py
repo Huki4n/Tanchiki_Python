@@ -3,16 +3,12 @@ from PyQt6.QtGui import QPainter, QPixmap, QTransform
 from PyQt6.QtWidgets import QLabel
 import math
 
-from ui_main import walls_coordinate
-
 
 class Bullet:
   bulletWidth, bulletHeight = 10, 6
   bulletSize = (bulletWidth, bulletHeight)
-  mapWidth, mapHeight = 830, 780
-  tankWidth, tankHeight = 54, 48
 
-  def __init__(self, parent, start_pos, angle, players, on_hit_callback):
+  def __init__(self, parent, start_pos, angle, players, player_id, socket_communication, current_player_bullet):
     """
     Инициализация снаряда.
 
@@ -20,14 +16,15 @@ class Bullet:
     :param start_pos: Начальная позиция (x, y).
     :param angle: Угол движения снаряда.
     :param players: Список танков (словарь {player_id: QLabel}).
-    :param on_hit_callback: Функция для вызова при попадании (в танк или стену).
     """
 
+    self.socket_communication = socket_communication
     self.parent = parent
     self.angle = angle
     self.speed = 20
     self.players = players
-    self.on_hit_callback = on_hit_callback
+    self.player_id = player_id
+    self.current_player_bullet = current_player_bullet
 
     # Создание QLabel для снаряда
     pixmap = QPixmap("assets/bullet.png")
@@ -44,13 +41,13 @@ class Bullet:
     self.label.show()
 
     # Таймер для движения
-    self.timer = QTimer(parent)
-    self.timer.timeout.connect(self.bullet_move)
-    self.timer.start(30)
+    if self.current_player_bullet:
+      self.timer = QTimer(parent)
+      self.timer.timeout.connect(self.bullet_move)
+      self.timer.start(30)
 
   def bullet_move(self):
-
-    """Движение снаряда."""
+    """Отправка данных о движении пули на сервер."""
     dx = self.speed * math.cos(math.radians(self.angle))
     dy = self.speed * math.sin(math.radians(self.angle))
 
@@ -58,40 +55,14 @@ class Bullet:
     new_x = int(round(current_pos.x() + dx))
     new_y = int(round(current_pos.y() + dy))
 
-    if not self.can_bullet_move(new_x, new_y) or self.check_collision(new_x, new_y):
-      self.destroy()
-      return
+    # Отправляем обновленную позицию на сервер
+    if self.current_player_bullet:
+      self.socket_communication.send_data_queue.put(('bullet_move', (new_x, new_y, self.angle, self.player_id,)))
 
     self.label.move(new_x, new_y)
 
-  def can_bullet_move(self, x, y):
-    """Проверка, может ли снаряд двигаться (не выходит за пределы карты)."""
-    return (0 <= x <= self.mapWidth - self.bulletWidth and
-            0 <= y <= self.mapHeight - self.bulletHeight)
-
-  def check_collision(self, x, y):
-    """Проверка столкновений с танками или стенами."""
-    # Проверка столкновения со стенами
-    cell_width = self.mapWidth / 13
-    cell_height = self.mapHeight / 14
-
-    col = math.floor(x / cell_width)
-    row = math.floor(y / cell_height)
-
-    if (row, col) in walls_coordinate:
-      self.on_hit_callback("wall", None)
-      return True
-
-    # Проверка столкновения с танками
-    bullet_rect = QRect(x, y, *self.bulletSize)
-    for player_id, player_label in self.players.items():
-      if bullet_rect.intersects(player_label.geometry()):
-        self.on_hit_callback("player", player_id)
-        return True
-
-    return False
-
   def destroy(self):
     """Удаление снаряда."""
-    self.timer.stop()
+    if self.current_player_bullet:
+      self.timer.stop()
     self.label.deleteLater()

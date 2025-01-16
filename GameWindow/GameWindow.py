@@ -3,12 +3,13 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import pyqtSlot, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent, QTransform, QPixmap
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLineEdit, QLabel, QPushButton
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout
 
 from Bullet.Bullet import Bullet
 from Client.Client import SocketCommunication
 from Signals.Signals import GUICommunication
-from ui_main import Ui_MainWindow, walls_coordinate
+from constancs import Constants
+from ui_main import Ui_MainWindow
 
 BUFFER_SIZE = 1024
 
@@ -51,18 +52,22 @@ class SignIn(QWidget):
 
   @pyqtSlot(int, tuple)
   def signin_player_updating_logic(self, player_id, position):
-    self.player['id'] = player_id
-    self.player['position'] = position
+    print(player_id, position)
+    self.player['id'] = player_id if player_id else 0
+    self.player['position'] = position if position else (1, Constants.mapHeight - Constants.tankHeight)
 
   @pyqtSlot()
   def set_username(self):
     username = self.input_field.text()
+
     if not username.isalnum():
       self.status.setText("Wrong username")
       return
+
     self.username = username
     self.chat_window = MainWindow(username, self.gui_communication, self.socket_communication, self.player, self)
     self.gui_communication.player_updating_signal.disconnect(self.signin_player_updating_logic)
+
     self.hide()
 
 
@@ -86,6 +91,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     self.shoot_delay = 1000
     self.can_shoot = True
+    self.first_bullet = True
 
     self.current_direction = "top"
 
@@ -98,11 +104,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     self.gui_communication.player_updating_signal.connect(self.player_updating_logic)
     self.gui_communication.game_updating_signal.connect(self.game_updating_logic)
+    self.gui_communication.bullet_hit_signal.connect(self.handle_bullet_hit)
+    self.gui_communication.bullet_move_signal.connect(self.handle_bullet_move)
 
     self.add_player_to_map(self.player['position'], self.player['id'])
 
     if self.player['id'] == 1:
-      self.add_player_to_map((1, self.mapHeight - self.tankHeight), 0)
+      self.add_player_to_map((1, Constants.mapHeight - Constants.tankHeight), 0)
 
     self.shoot_timer = QTimer()
     self.shoot_timer.timeout.connect(self.reset_shoot_flag)
@@ -133,7 +141,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     if direction:
       x, y, angle = self.move_player(player_id, direction)  # Передаем player_id в move_player
-      self.socket_communication.send_data_queue.put(('position', (player_id, (x, y), angle)))  # Отправляем также player_id
+      self.socket_communication.send_data_queue.put(
+        ('position', (player_id, (x, y), angle)))  # Отправляем также player_id
 
   @pyqtSlot(QKeyEvent)
   def keyPressEvent(self, event: QKeyEvent):
@@ -152,7 +161,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
   def add_player_to_map(self, position, player_id):
     x, y = position
-    tank_pixmap = QPixmap('assets/tank.png').scaled(self.tankWidth, self.tankHeight)
+    tank_pixmap = QPixmap('assets/tank.png').scaled(Constants.tankWidth, Constants.tankHeight)
 
     if player_id == 1:
       transform = QTransform().rotate(180)
@@ -162,7 +171,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     player_label = QLabel(self.centralWidget)
     player_label.setStyleSheet("QLabel { border: 1px solid red; }")
-    player_label.setGeometry(x, y, self.tankWidth, self.tankHeight)
+    player_label.setGeometry(x, y, Constants.tankWidth, Constants.tankHeight)
     player_label.setPixmap(tank_pixmap)
     player_label.show()
     player_label.setScaledContents(True)
@@ -206,13 +215,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
   # HELPER METHODS
   def can_move(self, newX, newY):
-    cellWidth = self.mapWidth / 13
-    cellHeight = self.mapHeight / 14
+    cellWidth = Constants.mapWidth / 13
+    cellHeight = Constants.mapHeight / 14
 
     left = newX
-    right = newX + self.tankWidth
+    right = newX + Constants.tankWidth
     top = newY
-    bottom = newY + self.tankHeight
+    bottom = newY + Constants.tankHeight
 
     points_to_check = [
       (math.floor(top / cellHeight), math.floor(left / cellWidth)),
@@ -222,11 +231,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     ]
 
     for point in points_to_check:
-      if point in walls_coordinate:
+      if point in Constants.walls_coordinate:
         return False
 
-    return (0 <= newX <= self.mapWidth - self.tankWidth
-            and 0 <= newY <= self.mapHeight - self.tankHeight)
+    return (0 <= newX <= Constants.mapWidth - Constants.tankWidth
+            and 0 <= newY <= Constants.mapHeight - Constants.tankHeight)
 
   def rotate_tank(self, player_label, player_id, angle):
     transform = QTransform().rotate(angle)
@@ -242,41 +251,96 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     player_label = self.players[player_id]
     player_pos = player_label.pos()
 
-    bullet_directions = {
-      "right": [(
-        player_pos.x() + self.tankWidth - Bullet.bulletWidth // 2,
-        player_pos.y() + self.tankHeight // 2,
-      ), 0],
-      "bottom": [(
-        player_pos.x() + self.tankWidth // 2 - Bullet.bulletWidth // 4,
-        player_pos.y() + self.tankHeight - Bullet.bulletHeight * 2,
-      ), 90],
-      "left": [(
-        player_pos.x() + Bullet.bulletWidth // 2,
-        player_pos.y() + self.tankHeight // 2,
-      ), -180],
-      "top": [(
-        player_pos.x() + self.tankWidth // 2 - Bullet.bulletWidth // 4,
-        player_pos.y(),
-      ), -90],
-    }
-
-    start_pos = bullet_directions[self.current_direction][0]
-    angle = bullet_directions[self.current_direction][1]
+    start_pos, angle = self.get_bullet_position(player_pos.x(), player_pos.y(), self.current_direction)
 
     # Создание снаряда
     bullet = Bullet(
+      socket_communication=self.socket_communication,
       parent=self.centralWidget,
       start_pos=start_pos,
       angle=angle,
       players=self.players,
-      on_hit_callback=self.handle_bullet_hit,
+      player_id=player_id,
+      current_player_bullet=True,
     )
 
-    self.bullets.append(bullet)
+    self.can_shoot = False
+    self.bullets.append([player_id, bullet])
 
-  def handle_bullet_hit(self, hit_type, target_id):
-    if hit_type == "wall":
-      print("Bullet hit a wall.")
-    elif hit_type == "player":
-      print(f"Bullet hit player {target_id}.")
+  @pyqtSlot(str, int, int)
+  def handle_bullet_hit(self, hit_type, target_id, shooter_id):
+
+    if hit_type == "player":
+      if target_id == self.player['id']:
+        print(f"Player {shooter_id} hit you")
+        self.render_finish_game("YOU DIED", "red")
+      else:
+        print(f"You hit player {shooter_id}")
+        self.render_finish_game("YOU WIN", "green")
+
+    elif hit_type == "wall":
+      print("Bullet hit a wall")
+    elif hit_type == "border":
+      print("Bullet out of border")
+
+    if len(self.bullets) > 0:
+      player_id, bullet = self.bullets[0]
+      if bullet is not None:
+        bullet.destroy()
+        self.bullets.pop(0)
+
+  @pyqtSlot(int, int, int, int)
+  def handle_bullet_move(self, player_id, angle, x, y):
+    if player_id != self.player['id']:
+      # Проверяем, есть ли пуля для данного игрока
+      existing_bullet = next((bullet for pid, bullet in self.bullets if pid == player_id), None)
+
+      if existing_bullet:
+        # Если пуля уже существует, обновляем её координаты
+        existing_bullet.label.move(x, y)
+      else:
+        # Если пули еще нет, создаем новую
+        bullet = Bullet(
+          socket_communication=self.socket_communication,
+          parent=self.centralWidget,
+          start_pos=self.get_bullet_position(
+            self.player['position'][0], self.player['position'][1], angle
+          )[0],
+          angle=angle,
+          players=self.players,
+          player_id=player_id,
+          current_player_bullet=False,
+        )
+        self.bullets.append([player_id, bullet])  # Добавляем пулю в список
+
+  def get_bullet_position(self, x, y, direction):
+    bullet_directions = {
+      "right": [(
+        x + Constants.tankWidth - Bullet.bulletWidth // 2,
+        y + Constants.tankHeight // 2,
+      ), 0],
+      "bottom": [(
+        x + Constants.tankWidth // 2 - Bullet.bulletWidth // 4,
+        y + Constants.tankHeight - Bullet.bulletHeight * 2,
+      ), 90],
+      "left": [(
+        x + Bullet.bulletWidth // 2,
+        y + Constants.tankHeight // 2,
+      ), -180],
+      "top": [(
+        x + Constants.tankWidth // 2 - Bullet.bulletWidth // 4,
+        y,
+      ), -90],
+    }
+
+    angle_to_directions = {
+      '90': 'bottom',
+      '-90': 'top',
+      '-180': 'left',
+      '0': 'right',
+    }
+
+    if isinstance(direction, str):
+      return bullet_directions[direction]
+    else:
+      return bullet_directions[angle_to_directions[str(direction)]]

@@ -61,3 +61,12 @@ class SocketCommunication:
           player_id = body['id']
           position = body['position']
           self.gui_communication.player_updating_signal.emit(player_id, position)
+        case 'bullet_hit':
+          hit_type = body['hit_type']
+          target_id = body['target_id']
+          shooter_id = body['shooter_id']
+
+          self.gui_communication.bullet_hit_signal.emit(hit_type, target_id, shooter_id)
+        case 'bullet_move':
+          x, y, angle, player_id = body
+          self.gui_communication.bullet_move_signal.emit(player_id, angle, x, y)
